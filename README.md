@@ -150,7 +150,7 @@ reachy-assistant/
 
 - [ ] Camera vision — pipe Reachy's camera feed into Claude for visual awareness
 - [ ] Persistent head poses — hold a position between moves
-- [ ] Custom wake word — replace "Porcupine" with "Hey Reachy"
+- [X] Custom wake word — replace "Porcupine" with "Hey Reachy"
 - [ ] Local fallback — use Ollama when Claude API is unreachable
 - [ ] Emotion detection — respond to tone of voice with matching animations
 - [ ] Multi-step movement sequences — choreographed gestures
