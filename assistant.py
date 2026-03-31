@@ -37,6 +37,8 @@ MEMORY_DIR = 'memory'
 FACTS_FILE = f'{MEMORY_DIR}/facts.json'
 CONVERSATIONS_FILE = f'{MEMORY_DIR}/conversations.json'
 CONVERSATION_TTL_DAYS = 7
+WAKE_WORD_PATH = os.getenv('WAKE_WORD_PATH')       # Path to custom .ppn file (optional)
+WAKE_WORD_NAME = os.getenv('WAKE_WORD_NAME', 'Porcupine')  # Display name for the wake word
 
 # --- Memory setup ---
 os.makedirs(MEMORY_DIR, exist_ok=True)
@@ -132,10 +134,16 @@ print("Connecting to Claude...")
 claude = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
 print("Loading wake word detector...")
-porcupine = pvporcupine.create(
-    access_key=os.getenv('PICOVOICE_API_KEY'),
-    keywords=['porcupine']
-)
+if WAKE_WORD_PATH:
+    porcupine = pvporcupine.create(
+        access_key=os.getenv('PICOVOICE_API_KEY'),
+        keyword_paths=[WAKE_WORD_PATH]
+    )
+else:
+    porcupine = pvporcupine.create(
+        access_key=os.getenv('PICOVOICE_API_KEY'),
+        keywords=['porcupine']
+    )
 
 print("Connecting to Reachy Mini...")
 reachy = ReachyMini()
@@ -305,7 +313,7 @@ def wait_for_wake_word():
                     rate=porcupine.sample_rate,
                     input=True, input_device_index=MIC_DEVICE_INDEX,
                     frames_per_buffer=porcupine.frame_length)
-    print("\nWaiting for wake word... (say 'Porcupine')")
+    print(f"\nWaiting for wake word... (say '{WAKE_WORD_NAME}')")
     while True:
         pcm = stream.read(porcupine.frame_length)
         pcm = struct.unpack_from('h' * porcupine.frame_length, pcm)
@@ -374,7 +382,7 @@ def speak(text):
     stop_animation()
 
 # --- Main loop ---
-print("\nReechy is ready! Say 'Porcupine' to wake her up. Ctrl+C to quit.\n")
+print(f"\nReechy is ready! Say '{WAKE_WORD_NAME}' to wake her up. Ctrl+C to quit.\n")
 try:
     while True:
         wait_for_wake_word()
