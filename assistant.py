@@ -37,6 +37,8 @@ MEMORY_DIR = 'memory'
 FACTS_FILE = f'{MEMORY_DIR}/facts.json'
 CONVERSATIONS_FILE = f'{MEMORY_DIR}/conversations.json'
 CONVERSATION_TTL_DAYS = 7
+WAKE_WORD_PATH = os.getenv('WAKE_WORD_PATH')       # Path to custom .ppn file (optional)
+WAKE_WORD_NAME = os.getenv('WAKE_WORD_NAME', 'Porcupine')  # Display name for the wake word
 
 # --- Memory setup ---
 os.makedirs(MEMORY_DIR, exist_ok=True)
@@ -132,10 +134,16 @@ print("Connecting to Claude...")
 claude = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
 print("Loading wake word detector...")
-porcupine = pvporcupine.create(
-    access_key=os.getenv('PICOVOICE_API_KEY'),
-    keywords=['porcupine']
-)
+if WAKE_WORD_PATH:
+    porcupine = pvporcupine.create(
+        access_key=os.getenv('PICOVOICE_API_KEY'),
+        keyword_paths=[WAKE_WORD_PATH]
+    )
+else:
+    porcupine = pvporcupine.create(
+        access_key=os.getenv('PICOVOICE_API_KEY'),
+        keywords=['porcupine']
+    )
 
 print("Connecting to Reachy Mini...")
 reachy = ReachyMini()
@@ -305,7 +313,7 @@ def wait_for_wake_word():
                     rate=porcupine.sample_rate,
                     input=True, input_device_index=MIC_DEVICE_INDEX,
                     frames_per_buffer=porcupine.frame_length)
-    print("\nWaiting for wake word... (say 'Porcupine')")
+    print(f"\nWaiting for wake word... (say '{WAKE_WORD_NAME}')")
     while True:
         pcm = stream.read(porcupine.frame_length)
         pcm = struct.unpack_from('h' * porcupine.frame_length, pcm)
@@ -374,96 +382,97 @@ def speak(text):
     stop_animation()
 
 # --- Main loop ---
-print("\nReechy is ready! Say 'Porcupine' to wake her up. Ctrl+C to quit.\n")
-try:
-    while True:
-        wait_for_wake_word()
-        stop_animation()
-        speak("Yes?")
-
-        last_interaction = time.time()
+if __name__ == '__main__':
+    print(f"\nReechy is ready! Say '{WAKE_WORD_NAME}' to wake her up. Ctrl+C to quit.\n")
+    try:
         while True:
-            animate_listening()
-
-            p = pyaudio.PyAudio()
-            stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLE_RATE,
-                            input=True, input_device_index=MIC_DEVICE_INDEX,
-                            frames_per_buffer=CHUNK_SIZE)
-            frames = []
-            silence_count = 0
-            speaking = False
-            timed_out = False
-
-            while True:
-                if not speaking and (time.time() - last_interaction) > INACTIVITY_TIMEOUT:
-                    timed_out = True
-                    break
-
-                chunk = stream.read(CHUNK_SIZE)
-                frames.append(chunk)
-                audio_chunk = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-                tensor = torch.from_numpy(audio_chunk)
-                speech_dict = vad_iterator(tensor, return_seconds=False)
-
-                if speech_dict:
-                    if 'start' in speech_dict:
-                        speaking = True
-                        last_interaction = time.time()
-                        silence_count = 0
-                        print("Speech detected...")
-                    if 'end' in speech_dict:
-                        silence_count += 1
-
-                if speaking and silence_count >= SILENCE_THRESHOLD:
-                    print("Speech ended, processing...")
-                    break
-
-                if len(frames) > (SAMPLE_RATE / CHUNK_SIZE) * 15:
-                    break
-
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
-            vad_iterator.reset_states()
+            wait_for_wake_word()
             stop_animation()
+            speak("Yes?")
 
-            if timed_out or not speaking:
-                print("No activity detected, going back to sleep.")
-                save_conversation_summary(conversation)
-                conversation.clear()
-                break
-
-            with wave.open(AUDIO_FILE, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(b''.join(frames))
-
-            print("Transcribing...")
-            user_text = transcribe()
-            if not user_text:
-                print("Didn't catch that.")
-                continue
-
-            print(f"You: {user_text}")
-
-            # Sleep words — exit assistant
-            sleep_phrases = ['goodbye', 'good bye', 'bye', 'go to sleep', 'sleep', 'stop listening']
-            if any(phrase in user_text.lower() for phrase in sleep_phrases):
-                speak("Goodbye! Talk to you later.")
-                save_conversation_summary(conversation)
-                conversation.clear()
-                raise KeyboardInterrupt
-
-            animate_thinking()
-            reply = ask_claude(user_text)
-            stop_animation()
-            print(f"Reechy: {reply}")
-            speak(reply)
             last_interaction = time.time()
+            while True:
+                animate_listening()
 
-except KeyboardInterrupt:
-    print("\nGoodbye!")
-    save_conversation_summary(conversation)
-    stop_animation()
-    porcupine.delete()
+                p = pyaudio.PyAudio()
+                stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLE_RATE,
+                                input=True, input_device_index=MIC_DEVICE_INDEX,
+                                frames_per_buffer=CHUNK_SIZE)
+                frames = []
+                silence_count = 0
+                speaking = False
+                timed_out = False
+
+                while True:
+                    if not speaking and (time.time() - last_interaction) > INACTIVITY_TIMEOUT:
+                        timed_out = True
+                        break
+
+                    chunk = stream.read(CHUNK_SIZE)
+                    frames.append(chunk)
+                    audio_chunk = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                    tensor = torch.from_numpy(audio_chunk)
+                    speech_dict = vad_iterator(tensor, return_seconds=False)
+
+                    if speech_dict:
+                        if 'start' in speech_dict:
+                            speaking = True
+                            last_interaction = time.time()
+                            silence_count = 0
+                            print("Speech detected...")
+                        if 'end' in speech_dict:
+                            silence_count += 1
+
+                    if speaking and silence_count >= SILENCE_THRESHOLD:
+                        print("Speech ended, processing...")
+                        break
+
+                    if len(frames) > (SAMPLE_RATE / CHUNK_SIZE) * 15:
+                        break
+
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
+                vad_iterator.reset_states()
+                stop_animation()
+
+                if timed_out or not speaking:
+                    print("No activity detected, going back to sleep.")
+                    save_conversation_summary(conversation)
+                    conversation.clear()
+                    break
+
+                with wave.open(AUDIO_FILE, 'wb') as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(SAMPLE_RATE)
+                    wf.writeframes(b''.join(frames))
+
+                print("Transcribing...")
+                user_text = transcribe()
+                if not user_text:
+                    print("Didn't catch that.")
+                    continue
+
+                print(f"You: {user_text}")
+
+                # Sleep words — exit assistant
+                sleep_phrases = ['goodbye', 'good bye', 'bye', 'go to sleep', 'sleep', 'stop listening']
+                if any(phrase in user_text.lower() for phrase in sleep_phrases):
+                    speak("Goodbye! Talk to you later.")
+                    save_conversation_summary(conversation)
+                    conversation.clear()
+                    raise KeyboardInterrupt
+
+                animate_thinking()
+                reply = ask_claude(user_text)
+                stop_animation()
+                print(f"Reechy: {reply}")
+                speak(reply)
+                last_interaction = time.time()
+
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+        save_conversation_summary(conversation)
+        stop_animation()
+        porcupine.delete()
